@@ -149,7 +149,28 @@ function updateRemote(){
 }
 function setupStick(id,onMove){const el=$(id),knob=el.querySelector(".knob");let active=null,origin=null;const reset=()=>{active=null;origin=null;knob.style.transform="translate(0px,0px)";onMove(0,0,true)};el.addEventListener("pointerdown",e=>{e.preventDefault();lastActivity=Date.now();active=e.pointerId;el.setPointerCapture(active);const r=el.getBoundingClientRect();origin={x:r.left+r.width/2,y:r.top+r.height/2};update(e)});function update(e){if(active!==e.pointerId)return;let dx=e.clientX-origin.x,dy=e.clientY-origin.y;const max=48,len=Math.hypot(dx,dy);if(len>max){dx=dx/len*max;dy=dy/len*max}knob.style.transform=`translate(${dx}px,${dy}px)`;onMove(dx/max,dy/max,false)}el.addEventListener("pointermove",update);el.addEventListener("pointerup",reset);el.addEventListener("pointercancel",reset);}
 setupStick("moveStick",(x,y)=>{moveStick.x=x;moveStick.y=y});
-let prevLookX=0,prevLookY=0;setupStick("lookStick",(x,y,reset)=>{if(reset){prevLookX=0;prevLookY=0;return}cameraYaw-=(x-prevLookX)*.055;cameraPitch=Math.max(-1.52,Math.min(1.52,cameraPitch-(y-prevLookY)*.05));lastActivity=Date.now();prevLookX=x;prevLookY=y});
+// Kamera joystick'i: parmak hareketinin tamamını takip eder; çemberin kenarında takılı kalmaz.
+(function setupFreeLook(){
+ const el=$("lookStick"),knob=el.querySelector(".knob");
+ let active=null,lastX=0,lastY=0;
+ function end(e){if(active===null||e.pointerId!==active)return;active=null;knob.style.transform="translate(0px,0px)"}
+ el.addEventListener("pointerdown",e=>{
+  e.preventDefault();lastActivity=Date.now();active=e.pointerId;lastX=e.clientX;lastY=e.clientY;
+  el.setPointerCapture(active);
+ });
+ el.addEventListener("pointermove",e=>{
+  if(active===null||e.pointerId!==active)return;
+  const dx=e.clientX-lastX,dy=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;
+  cameraYaw-=dx*.008;
+  cameraPitch=Math.max(-1.55,Math.min(1.55,cameraPitch-dy*.008));
+  const r=el.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;
+  let kx=e.clientX-cx,ky=e.clientY-cy,len=Math.hypot(kx,ky),max=48;
+  if(len>max){kx=kx/len*max;ky=ky/len*max}
+  knob.style.transform=`translate(${kx}px,${ky}px)`;
+  lastActivity=Date.now();
+ });
+ el.addEventListener("pointerup",end);el.addEventListener("pointercancel",end);
+})();
 $("jumpBtn").addEventListener("pointerdown",e=>{e.preventDefault();lastActivity=Date.now();keys[" "]=true});["pointerup","pointercancel","pointerleave"].forEach(ev=>$("jumpBtn").addEventListener(ev,()=>keys[" "]=false));
 function readGamepad(){if(controlMode!=="gamepad")return;const pads=navigator.getGamepads?.()||[];const gp=Array.from(pads).find(Boolean);if(!gp)return;const dead=.18;const x=Math.abs(gp.axes[0]||0)>dead?gp.axes[0]:0,z=Math.abs(gp.axes[1]||0)>dead?gp.axes[1]:0;const rx=Math.abs(gp.axes[2]||0)>dead?gp.axes[2]:0,ry=Math.abs(gp.axes[3]||0)>dead?gp.axes[3]:0;keys.a=x<-.1;keys.d=x>.1;keys.w=z<-.1;keys.s=z>.1;keys[" "]=!!(gp.buttons[0]?.pressed||gp.buttons[1]?.pressed);cameraYaw-=rx*.045;cameraPitch=Math.max(-1.52,Math.min(1.52,cameraPitch-ry*.04));if(x||z||rx||ry)lastActivity=Date.now()}
 function physics(dt){
