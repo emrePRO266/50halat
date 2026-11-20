@@ -125,7 +125,7 @@ function platform(x,y,z,w,h,d,color=0x18a58a){const m=new THREE.Mesh(new THREE.B
 const colliders=[];let levelObjects=[];
 function clearParkour(){for(const o of levelObjects)scene.remove(o);levelObjects=[];colliders.length=0}
 function addLevelPlatform(x,y,z,w,h,d,color=0x18a58a){const m=platform(x,y,z,w,h,d,color);levelObjects.push(m);return m}
-function buildParkour(){clearParkour();addLevelPlatform(0,-.5,0,12,1,12,0x274e70);for(let lv=0;lv<100;lv++){const base=-10-lv*22,pattern=lv%4;const coords=pattern===0?[[0,0],[4,-5],[-2,-10],[3,-15],[0,-19]]:pattern===1?[[-3,0],[2,-5],[5,-10],[0,-15],[-3,-19]]:pattern===2?[[3,0],[-2,-5],[-5,-10],[1,-15],[3,-19]]:[[0,0],[0,-5],[4,-10],[-4,-15],[0,-19]];coords.forEach((q,i)=>{const x=q[0],z=base+q[1],y=.15+lv*.12+i*.22;addLevelPlatform(x,y,z,i===4?6:4,.5,3.5,i===4?0x2476cf:0x18a58a);if(i<4){const b=new THREE.Mesh(new THREE.BoxGeometry(.9,.65,.9),obstacleMat);b.position.set(x+(lv%2?1.1:-1.1),y+.55,z-1);b.castShadow=true;scene.add(b);levelObjects.push(b)}})}}
+function buildParkour(){clearParkour();addLevelPlatform(0,-.5,0,12,1,12,0x274e70);for(let lv=0;lv<100;lv++){const base=-10-lv*22,pattern=lv%4;if(lv>0)addLevelPlatform(0,.15+lv*.12,base+2,6,.5,4,0x274e70);const coords=pattern===0?[[0,0],[4,-5],[-2,-10],[3,-15],[0,-19]]:pattern===1?[[-3,0],[2,-5],[5,-10],[0,-15],[-3,-19]]:pattern===2?[[3,0],[-2,-5],[-5,-10],[1,-15],[3,-19]]:[[0,0],[0,-5],[4,-10],[-4,-15],[0,-19]];coords.forEach((q,i)=>{const x=q[0],z=base+q[1],y=.15+lv*.12+i*.22;addLevelPlatform(x,y,z,i===4?6:4,.5,3.5,i===4?0x2476cf:0x18a58a);if(i<4){const b=new THREE.Mesh(new THREE.BoxGeometry(.9,.65,.9),obstacleMat);b.position.set(x+(lv%2?1.1:-1.1),y+.55,z-1);b.castShadow=true;scene.add(b);levelObjects.push(b)}})}}
 buildParkour();
 const playerColors=[0x2563eb,0xe85d75,0xf0b429,0x9b72cf];
 function colorForSlot(slot){return playerColors[((slot??0)%playerColors.length+playerColors.length)%playerColors.length]}
@@ -151,7 +151,7 @@ function setupStick(id,onMove){const el=$(id),knob=el.querySelector(".knob");let
 setupStick("moveStick",(x,y)=>{moveStick.x=x;moveStick.y=y});
 let prevLookX=0,prevLookY=0;setupStick("lookStick",(x,y,reset)=>{if(reset){prevLookX=0;prevLookY=0;return}cameraYaw-=(x-prevLookX)*.055;cameraPitch=Math.max(-1.52,Math.min(1.52,cameraPitch-(y-prevLookY)*.05));lastActivity=Date.now();prevLookX=x;prevLookY=y});
 $("jumpBtn").addEventListener("pointerdown",e=>{e.preventDefault();lastActivity=Date.now();keys[" "]=true});["pointerup","pointercancel","pointerleave"].forEach(ev=>$("jumpBtn").addEventListener(ev,()=>keys[" "]=false));
-function readGamepad(){if(controlMode!=="gamepad")return;const pads=navigator.getGamepads?.()||[];const gp=Array.from(pads).find(Boolean);if(!gp)return;const dead=.18;const x=Math.abs(gp.axes[0]||0)>dead?gp.axes[0]:0,z=Math.abs(gp.axes[1]||0)>dead?gp.axes[1]:0;keys.a=x<-.1;keys.d=x>.1;keys.w=z<-.1;keys.s=z>.1;keys[" "]=!!(gp.buttons[0]?.pressed||gp.buttons[1]?.pressed)}
+function readGamepad(){if(controlMode!=="gamepad")return;const pads=navigator.getGamepads?.()||[];const gp=Array.from(pads).find(Boolean);if(!gp)return;const dead=.18;const x=Math.abs(gp.axes[0]||0)>dead?gp.axes[0]:0,z=Math.abs(gp.axes[1]||0)>dead?gp.axes[1]:0;const rx=Math.abs(gp.axes[2]||0)>dead?gp.axes[2]:0,ry=Math.abs(gp.axes[3]||0)>dead?gp.axes[3]:0;keys.a=x<-.1;keys.d=x>.1;keys.w=z<-.1;keys.s=z>.1;keys[" "]=!!(gp.buttons[0]?.pressed||gp.buttons[1]?.pressed);cameraYaw-=rx*.045;cameraPitch=Math.max(-1.52,Math.min(1.52,cameraPitch-ry*.04));if(x||z||rx||ry)lastActivity=Date.now()}
 function physics(dt){
  if(!started)return;
  readGamepad();
@@ -179,7 +179,7 @@ function physics(dt){
    const top=c.y+c.h/2;if(oldY>=top-.1&&pos.y<=top&&vel.y<=0){pos.y=top;vel.y=0;grounded=true}
   }
  }
- if(pos.y < -10){pos.set(0,1,2-(currentLevel-1)*22);vel.set(0,0,0);toast("Düştün! Seviyenin başına döndün.")}
+ if(pos.y < -10){const spawnZ=currentLevel===1?2:-10-(currentLevel-1)*22+2;pos.set(0,.55+(currentLevel-1)*.12,spawnZ);vel.set(0,0,0);toast("Düştün! Seviyenin başına döndün.")}
  const reached=Math.floor((-pos.z-8)/22)+1;if(reached>currentLevel&&currentLevel<100){currentLevel=Math.min(100,reached);$("levelLabel").textContent="SEVİYE "+currentLevel+" / 100";toast("Seviye "+currentLevel+"!") }
  avatar.position.copy(pos);avatar.rotation.y=Math.atan2(lastFacing.x,lastFacing.z);
  camera.position.set(pos.x,pos.y+1.48,pos.z);
