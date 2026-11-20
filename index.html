@@ -22,11 +22,12 @@ button{background:#2677e8;border:0;font-weight:700;cursor:pointer}button.seconda
 </head>
 <body>
 <div id="game"></div>
+<section id="deviceSelect" class="panel"><h1>🎮 Nasıl oynayacaksın?</h1><p>Başlamadan önce cihazını seç. Kontroller buna göre ayarlanacak.</p><button data-mode="tablet">📱 Tablet / Dokunmatik</button><button data-mode="computer" class="secondary">💻 Bilgisayar / Klavye</button><button data-mode="gamepad" class="secondary">🎮 Gamepad</button></section>
 <div id="hud" class="hidden"><div class="pill" id="roomLabel">ODA</div><div class="pill" id="playersLabel">Oyuncu: 1/4</div></div>
 <div id="help" class="hidden">WASD: Hareket · SPACE: Zıpla · Halat en fazla 6 birim uzar</div>
 <div id="mobile" class="hidden"><button data-key="w">▲</button><button data-key="a">◀</button><button data-key="d">▶</button><button data-key="s">▼</button><button data-key=" ">Zıpla</button></div>
 <div id="toast"></div>
-<section id="menu" class="panel">
+<section id="menu" class="panel hidden">
 <h1>🪢 Halatlı Parkur 3D</h1>
 <p>2–4 arkadaş aynı odaya girin. Biriniz düşerse takım arkadaşınız halatın sınırları içinde onu çekerek kurtarmaya çalışabilir.</p>
 <input id="nickname" maxlength="20" placeholder="Oyuncu adın" value="Oyuncu">
@@ -44,7 +45,7 @@ const SUPABASE_KEY = "sb_publishable_kSKf7EpaNNdE1lxrDj5oAg_e-Jq83jw";
 const db = window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=id=>document.getElementById(id);
 let playerId=crypto.randomUUID();
-let room=null, me=null, channel=null, others=new Map(), started=false, lastSend=0, lastDb=0;
+let room=null, me=null, channel=null, others=new Map(), started=false, lastSend=0, lastDb=0, controlMode=null;
 const MAX_ROPE=6, keys={};
 function toast(t){$("toast").textContent=t;$("toast").style.display="block";setTimeout(()=>$("toast").style.display="none",2300)}
 function code(){return Math.random().toString(36).slice(2,8).toUpperCase()}
@@ -73,7 +74,7 @@ async function joinRoom(){
  room=r;me=p;await enterRoom();
 }
 async function enterRoom(){
- $("menu").querySelectorAll("input,.row").forEach(x=>x.classList.add("hidden"));
+ setOwnColor(me.slot);$("menu").querySelectorAll("input,.row").forEach(x=>x.classList.add("hidden"));
  $("waiting").classList.remove("hidden");$("waitingText").textContent="Oda kodu: "+room.join_code+" · Arkadaşlarına kodu gönder.";
  $("startBtn").classList.toggle("hidden",room.host_id!==playerId);
  $("hud").classList.remove("hidden");$("help").classList.remove("hidden");$("mobile").classList.remove("hidden");
@@ -100,8 +101,9 @@ $("createBtn").onclick=createRoom;$("joinBtn").onclick=joinRoom;
 $("copyBtn").onclick=()=>navigator.clipboard?.writeText(room.join_code).then(()=>toast("Oda kodu kopyalandı."));
 $("startBtn").onclick=async()=>{await db.from("game_rooms").update({status:"running"}).eq("id",room.id);beginGame()};
 function beginGame(){started=true;$("menu").classList.add("hidden");toast("Parkur başladı! Takımını bırakma.");}
-window.addEventListener("keydown",e=>{keys[e.key.toLowerCase()]=true;if(e.key===" ")e.preventDefault()});
+window.addEventListener("keydown",e=>{if(controlMode==="computer")keys[e.key.toLowerCase()]=true;if(e.key===" ")e.preventDefault()});
 window.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+document.querySelectorAll("#deviceSelect [data-mode]").forEach(b=>b.onclick=()=>{controlMode=b.dataset.mode;$("deviceSelect").classList.add("hidden");$("menu").classList.remove("hidden");$("mobile").classList.toggle("hidden",controlMode!=="tablet");$("help").textContent=controlMode==="tablet"?"Ekrandaki tuşlarla hareket et · Zıpla":controlMode==="gamepad"?"Gamepad: Sol çubukla hareket · A/B: Zıpla":"WASD: Hareket · SPACE: Zıpla"});
 document.querySelectorAll("#mobile button").forEach(b=>{
  const k=b.dataset.key;b.addEventListener("pointerdown",e=>{e.preventDefault();keys[k]=true});
  ["pointerup","pointerleave","pointercancel"].forEach(ev=>b.addEventListener(ev,()=>keys[k]=false));
@@ -118,21 +120,31 @@ const colliders=[];
 platform(0,-.5,0,12,1,12,0x274e70);
 platform(0,.1,-9,5,.5,4);platform(5,.5,-15,4,.5,4);platform(-1,1,-21,4,.5,4);platform(-7,1.5,-27,5,.5,4);platform(0,2,-34,7,.5,6,0x2476cf);
 for(let i=0;i<5;i++){const b=new THREE.Mesh(new THREE.BoxGeometry(1,.6,1),obstacleMat);b.position.set((i%2?1:-1)*1.3,.55,-5-i*5);b.castShadow=true;scene.add(b)}
-const playerMat=mat(0x2563eb),remoteMats=[mat(0xe85d75),mat(0xf0b429),mat(0x9b72cf)];
+const playerColors=[0x2563eb,0xe85d75,0xf0b429,0x9b72cf];
+function colorForSlot(slot){return playerColors[((slot??0)%playerColors.length+playerColors.length)%playerColors.length]}
+const playerMat=mat(colorForSlot(0)),remoteMats=playerColors.map(c=>mat(c));
 function makeAvatar(material){const g=new THREE.Group();const body=new THREE.Mesh(new THREE.CapsuleGeometry(.38,.7,4,8),material);body.position.y=.75;body.castShadow=true;g.add(body);const head=new THREE.Mesh(new THREE.SphereGeometry(.25,12,10),mat(0xffd6ad));head.position.y=1.42;g.add(head);scene.add(g);return g}
-const avatar=makeAvatar(playerMat);const remoteAvatars=new Map();
-let pos=new THREE.Vector3(0,0,2),vel=new THREE.Vector3(),grounded=false;
+const avatar=makeAvatar(playerMat);avatar.visible=false;const remoteAvatars=new Map();
+const sleeveMat=mat(colorForSlot(0));
+function setOwnColor(slot){sleeveMat.color.setHex(colorForSlot(slot));}
+function makeSleeve(x){const m=new THREE.Mesh(new THREE.CapsuleGeometry(.095,.38,3,7),sleeveMat);m.position.set(x,-.42,-.72);camera.add(m);return m}
+makeSleeve(-.32);makeSleeve(.32);
+const remoteColorMats=new Map();
+function remoteMaterial(slot){const c=colorForSlot(slot);if(!remoteColorMats.has(c))remoteColorMats.set(c,mat(c));return remoteColorMats.get(c)}
+let pos=new THREE.Vector3(0,0,2),vel=new THREE.Vector3(),grounded=false,lastFacing=new THREE.Vector3(0,0,-1);
 const ropeMat=new THREE.LineBasicMaterial({color:0xffe08a,linewidth:3});const ropes=new Map();
 function lineFor(id){if(!ropes.has(id)){const geo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);const l=new THREE.Line(geo,ropeMat);scene.add(l);ropes.set(id,l)}return ropes.get(id)}
 function updateRemote(){
- for(const [id,p] of others){if(!remoteAvatars.has(id))remoteAvatars.set(id,makeAvatar(remoteMats[p.slot%remoteMats.length]));
+ for(const [id,p] of others){if(!remoteAvatars.has(id))remoteAvatars.set(id,makeAvatar(remoteMaterial(p.slot)));
  const a=remoteAvatars.get(id);a.position.set(p.x,p.y,p.z);const l=lineFor(id);l.geometry.setFromPoints([new THREE.Vector3(pos.x,pos.y+.9,pos.z),new THREE.Vector3(p.x,p.y+.9,p.z)])}
  for(const [id,a] of remoteAvatars)if(!others.has(id)){scene.remove(a);remoteAvatars.delete(id);if(ropes.has(id)){scene.remove(ropes.get(id));ropes.delete(id)}}
 }
+function readGamepad(){if(controlMode!=="gamepad")return;const pads=navigator.getGamepads?.()||[];const gp=Array.from(pads).find(Boolean);if(!gp)return;const dead=.18;const x=Math.abs(gp.axes[0]||0)>dead?gp.axes[0]:0,z=Math.abs(gp.axes[1]||0)>dead?gp.axes[1]:0;keys.a=x<-.1;keys.d=x>.1;keys.w=z<-.1;keys.s=z>.1;keys[" "]=!!(gp.buttons[0]?.pressed||gp.buttons[1]?.pressed)}
 function physics(dt){
  if(!started)return;
+ readGamepad();
  const forward=new THREE.Vector3((keys.d?1:0)-(keys.a?1:0),0,(keys.s?1:0)-(keys.w?1:0));
- if(forward.lengthSq()>0)forward.normalize();
+ if(forward.lengthSq()>0){forward.normalize();lastFacing.copy(forward)}
  vel.x=forward.x*6;vel.z=forward.z*6;
  if(keys[" "]&&grounded){vel.y=8;grounded=false}
  vel.y-=19*dt;
@@ -152,8 +164,8 @@ function physics(dt){
   }
  }
  if(pos.y < -10){pos.set(0,1,2);vel.set(0,0,0);toast("Düştün! Başlangıç noktasına döndün.")}
- avatar.position.copy(pos);avatar.rotation.y=Math.atan2(forward.x,forward.z);
- camera.position.lerp(new THREE.Vector3(pos.x+8,pos.y+7,pos.z+11),.08);camera.lookAt(pos.x,pos.y+.5,pos.z-3);
+ avatar.position.copy(pos);avatar.rotation.y=Math.atan2(lastFacing.x,lastFacing.z);
+ camera.position.set(pos.x,pos.y+1.48,pos.z);camera.lookAt(pos.x+lastFacing.x,pos.y+1.35,pos.z+lastFacing.z);
 }
 async function sendState(now){
  if(!me||!room||!started||now-lastSend<120)return;lastSend=now;
