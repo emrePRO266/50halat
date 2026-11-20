@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Halatlı Parkur 3D</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#09111f;color:#fff;font-family:system-ui,Arial;overflow:hidden}
+#game{position:fixed;inset:0}canvas{display:block}
+.panel{position:fixed;z-index:5;left:50%;top:50%;transform:translate(-50%,-50%);width:min(92vw,430px);padding:24px;background:#101d31ee;border:1px solid #34506f;border-radius:20px;box-shadow:0 20px 70px #0009}
+h1{margin:0 0 8px;font-size:28px}p{color:#bdcce0;line-height:1.45;margin:8px 0 18px}
+input,button{width:100%;padding:13px 14px;border-radius:11px;border:1px solid #49617f;background:#0a1525;color:white;font-size:16px;margin-top:9px}
+button{background:#2677e8;border:0;font-weight:700;cursor:pointer}button.secondary{background:#253750}button:disabled{opacity:.45}
+.row{display:flex;gap:9px}.row>*{flex:1}.hidden{display:none!important}
+#hud{position:fixed;z-index:3;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;pointer-events:none}
+.pill{background:#101d31dd;border:1px solid #38516e;padding:9px 12px;border-radius:12px;font-size:13px}
+#help{position:fixed;z-index:3;bottom:12px;left:12px;background:#101d31dd;padding:10px 13px;border-radius:12px;font-size:12px;color:#d8e5f6}
+#mobile{position:fixed;z-index:4;bottom:18px;right:18px;display:none;gap:8px}
+#mobile button{width:54px;height:54px;margin:0;padding:0;border-radius:50%;background:#17375cdd}
+@media(max-width:700px){#mobile{display:flex;flex-wrap:wrap;width:120px}#help{max-width:52vw}}
+#toast{position:fixed;z-index:8;top:70px;left:50%;transform:translateX(-50%);background:#152c49;padding:10px 16px;border-radius:12px;display:none}
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="hud" class="hidden"><div class="pill" id="roomLabel">ODA</div><div class="pill" id="playersLabel">Oyuncu: 1/4</div></div>
+<div id="help" class="hidden">WASD: Hareket · SPACE: Zıpla · Halat en fazla 6 birim uzar</div>
+<div id="mobile" class="hidden"><button data-key="w">▲</button><button data-key="a">◀</button><button data-key="d">▶</button><button data-key="s">▼</button><button data-key=" ">Zıpla</button></div>
+<div id="toast"></div>
+<section id="menu" class="panel">
+<h1>🪢 Halatlı Parkur 3D</h1>
+<p>2–4 arkadaş aynı odaya girin. Biriniz düşerse takım arkadaşınız halatın sınırları içinde onu çekerek kurtarmaya çalışabilir.</p>
+<input id="nickname" maxlength="20" placeholder="Oyuncu adın" value="Oyuncu">
+<div class="row"><button id="createBtn">Oda Oluştur</button><button id="joinBtn" class="secondary">Odaya Katıl</button></div>
+<input id="roomCode" maxlength="6" placeholder="6 haneli oda kodu" style="text-transform:uppercase">
+<div id="waiting" class="hidden">
+<p id="waitingText"></p><button id="startBtn">Oyunu Başlat</button><button id="copyBtn" class="secondary">Oda Kodunu Kopyala</button>
+</div>
+</section>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = "https://greikwornaifopisuyze.supabase.co";
+const SUPABASE_KEY = "sb_publishable_kSKf7EpaNNdE1lxrDj5oAg_e-Jq83jw";
+const db = window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+const $=id=>document.getElementById(id);
+const playerId=localStorage.getItem("halat_player_id")||crypto.randomUUID();
+localStorage.setItem("halat_player_id",playerId);
+let room=null, me=null, channel=null, others=new Map(), started=false, lastSend=0, lastDb=0;
+const MAX_ROPE=6, keys={};
+function toast(t){$("toast").textContent=t;$("toast").style.display="block";setTimeout(()=>$("toast").style.display="none",2300)}
+function code(){return Math.random().toString(36).slice(2,8).toUpperCase()}
+async function createRoom(){
+ const nick=$("nickname").value.trim()||"Oyuncu", join_code=code();
+ const {data:r,error}=await db.from("game_rooms").insert({join_code,host_id:playerId,max_players:4}).select().single();
+ if(error){toast("Oda oluşturulamadı: "+error.message);return}
+ room=r;
+ const {data:p,error:pe}=await db.from("game_players").insert({id:playerId,room_id:r.id,nickname:nick,slot:0}).select().single();
+ if(pe){toast("Oyuncu eklenemedi: "+pe.message);return}
+ me=p;await enterRoom();
+}
+async function joinRoom(){
+ const nick=$("nickname").value.trim()||"Oyuncu", c=$("roomCode").value.trim().toUpperCase();
+ if(c.length!==6){toast("6 haneli oda kodunu gir.");return}
+ const {data:r,error}=await db.from("game_rooms").select("*").eq("join_code",c).eq("status","waiting").maybeSingle();
+ if(error||!r){toast("Oda bulunamadı veya oyun başlamış.");return}
+ const {data:ps,error:pe}=await db.from("game_players").select("*").eq("room_id",r.id).order("slot");
+ if(pe){toast(pe.message);return}
+ if(ps.length>=r.max_players){toast("Oda dolu.");return}
+ const used=new Set(ps.map(x=>x.slot));let slot=0;while(used.has(slot))slot++;
+ const {data:p,error:ie}=await db.from("game_players").insert({id:playerId,room_id:r.id,nickname:nick,slot}).select().single();
+ if(ie){toast("Katılınamadı: "+ie.message);return}
+ room=r;me=p;await enterRoom();
+}
+async function enterRoom(){
+ $("menu").querySelectorAll("input,.row").forEach(x=>x.classList.add("hidden"));
+ $("waiting").classList.remove("hidden");$("waitingText").textContent="Oda kodu: "+room.join_code+" · Arkadaşlarına kodu gönder.";
+ $("startBtn").classList.toggle("hidden",room.host_id!==playerId);
+ $("hud").classList.remove("hidden");$("help").classList.remove("hidden");$("mobile").classList.remove("hidden");
+ $("roomLabel").textContent="ODA "+room.join_code;
+ await refreshPlayers();subscribe();
+}
+async function refreshPlayers(){
+ const {data}=await db.from("game_players").select("*").eq("room_id",room.id).order("slot");
+ if(data){others.clear();data.forEach(p=>{if(p.id!==playerId)others.set(p.id,p)});$("playersLabel").textContent="Oyuncu: "+(data.length)+"/4";updateWaitingText(data)}
+}
+function updateWaitingText(data){$("waitingText").textContent="Oda kodu: "+room.join_code+"\n"+data.map(p=>"• "+p.nickname+(p.id===playerId?" (Sen)":"")).join("\n")}
+function subscribe(){
+ channel=db.channel("room-"+room.id)
+ .on("postgres_changes",{event:"*",schema:"public",table:"game_players",filter:"room_id=eq."+room.id},payload=>{
+  if(payload.eventType==="DELETE"){others.delete(payload.old.id);return}
+  const p=payload.new;if(p.id!==playerId)others.set(p.id,p);
+  $("playersLabel").textContent="Oyuncu: "+(others.size+1)+"/4";
+ })
+ .on("postgres_changes",{event:"UPDATE",schema:"public",table:"game_rooms",filter:"id=eq."+room.id},payload=>{
+  room=payload.new;if(room.status==="running")beginGame();
+ }).subscribe();
+}
+$("createBtn").onclick=createRoom;$("joinBtn").onclick=joinRoom;
+$("copyBtn").onclick=()=>navigator.clipboard?.writeText(room.join_code).then(()=>toast("Oda kodu kopyalandı."));
+$("startBtn").onclick=async()=>{await db.from("game_rooms").update({status:"running"}).eq("id",room.id);beginGame()};
+function beginGame(){started=true;$("menu").classList.add("hidden");toast("Parkur başladı! Takımını bırakma.");}
+window.addEventListener("keydown",e=>{keys[e.key.toLowerCase()]=true;if(e.key===" ")e.preventDefault()});
+window.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+document.querySelectorAll("#mobile button").forEach(b=>{
+ const k=b.dataset.key;b.addEventListener("pointerdown",e=>{e.preventDefault();keys[k]=true});
+ ["pointerup","pointerleave","pointercancel"].forEach(ev=>b.addEventListener(ev,()=>keys[k]=false));
+});
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x8dc9ef);scene.fog=new THREE.Fog(0x8dc9ef,35,100);
+const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,.1,200);
+const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;$("game").appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff,0x506080,2));
+const sun=new THREE.DirectionalLight(0xffffff,2);sun.position.set(8,18,8);sun.castShadow=true;scene.add(sun);
+const mat=(c)=>new THREE.MeshStandardMaterial({color:c,roughness:.72});
+const floorMat=mat(0x274e70),platformMat=mat(0x18a58a),obstacleMat=mat(0xf3a33b);
+function platform(x,y,z,w,h,d,color=0x18a58a){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat(color));m.position.set(x,y,z);m.receiveShadow=true;m.castShadow=true;scene.add(m);colliders.push({x,y,z,w,h,d});return m}
+const colliders=[];
+platform(0,-.5,0,12,1,12,0x274e70);
+platform(0,.1,-9,5,.5,4);platform(5,.5,-15,4,.5,4);platform(-1,1,-21,4,.5,4);platform(-7,1.5,-27,5,.5,4);platform(0,2,-34,7,.5,6,0x2476cf);
+for(let i=0;i<5;i++){const b=new THREE.Mesh(new THREE.BoxGeometry(1,.6,1),obstacleMat);b.position.set((i%2?1:-1)*1.3,.55,-5-i*5);b.castShadow=true;scene.add(b)}
+const playerMat=mat(0x2563eb),remoteMats=[mat(0xe85d75),mat(0xf0b429),mat(0x9b72cf)];
+function makeAvatar(material){const g=new THREE.Group();const body=new THREE.Mesh(new THREE.CapsuleGeometry(.38,.7,4,8),material);body.position.y=.75;body.castShadow=true;g.add(body);const head=new THREE.Mesh(new THREE.SphereGeometry(.25,12,10),mat(0xffd6ad));head.position.y=1.42;g.add(head);scene.add(g);return g}
+const avatar=makeAvatar(playerMat);const remoteAvatars=new Map();
+let pos=new THREE.Vector3(0,0,2),vel=new THREE.Vector3(),grounded=false;
+const ropeMat=new THREE.LineBasicMaterial({color:0xffe08a,linewidth:3});const ropes=new Map();
+function lineFor(id){if(!ropes.has(id)){const geo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);const l=new THREE.Line(geo,ropeMat);scene.add(l);ropes.set(id,l)}return ropes.get(id)}
+function updateRemote(){
+ for(const [id,p] of others){if(!remoteAvatars.has(id))remoteAvatars.set(id,makeAvatar(remoteMats[p.slot%remoteMats.length]));
+ const a=remoteAvatars.get(id);a.position.set(p.x,p.y,p.z);const l=lineFor(id);l.geometry.setFromPoints([new THREE.Vector3(pos.x,pos.y+.9,pos.z),new THREE.Vector3(p.x,p.y+.9,p.z)])}
+ for(const [id,a] of remoteAvatars)if(!others.has(id)){scene.remove(a);remoteAvatars.delete(id);if(ropes.has(id)){scene.remove(ropes.get(id));ropes.delete(id)}}
+}
+function physics(dt){
+ if(!started)return;
+ const forward=new THREE.Vector3((keys.d?1:0)-(keys.a?1:0),0,(keys.s?1:0)-(keys.w?1:0));
+ if(forward.lengthSq()>0)forward.normalize();
+ vel.x=forward.x*6;vel.z=forward.z*6;
+ if(keys[" "]&&grounded){vel.y=8;grounded=false}
+ vel.y-=19*dt;
+ // Halat gerilimi: en yakındaki takım arkadaşına göre hareketi sınırla.
+ for(const p of others.values()){
+  const dx=p.x-pos.x,dy=p.y-pos.y,dz=p.z-pos.z,dist=Math.hypot(dx,dy,dz);
+  if(dist>MAX_ROPE){const nx=dx/dist,ny=dy/dist,nz=dz/dist;const excess=dist-MAX_ROPE;
+   pos.x+=nx*excess*.55;pos.z+=nz*excess*.55;
+   if(p.y>pos.y+1 && !grounded)vel.y=Math.max(vel.y,2.8);
+  }
+ }
+ const oldY=pos.y;pos.addScaledVector(vel,dt);
+ grounded=false;
+ for(const c of colliders){
+  if(pos.x>c.x-c.w/2-.3&&pos.x<c.x+c.w/2+.3&&pos.z>c.z-c.d/2-.3&&pos.z<c.z+c.d/2+.3){
+   const top=c.y+c.h/2;if(oldY>=top-.1&&pos.y<=top&&vel.y<=0){pos.y=top;vel.y=0;grounded=true}
+  }
+ }
+ if(pos.y < -10){pos.set(0,1,2);vel.set(0,0,0);toast("Düştün! Başlangıç noktasına döndün.")}
+ avatar.position.copy(pos);avatar.rotation.y=Math.atan2(forward.x,forward.z);
+ camera.position.lerp(new THREE.Vector3(pos.x+8,pos.y+7,pos.z+11),.08);camera.lookAt(pos.x,pos.y+.5,pos.z-3);
+}
+async function sendState(now){
+ if(!me||!room||!started||now-lastSend<120)return;lastSend=now;
+ const state=pos.y<-.5?"falling":"active";
+ const payload={x:+pos.x.toFixed(2),y:+pos.y.toFixed(2),z:+pos.z.toFixed(2),state,updated_at:new Date().toISOString()};
+ db.from("game_players").update(payload).eq("id",playerId).then(()=>{});
+}
+function animate(now){requestAnimationFrame(animate);const dt=Math.min(.04,(now-(lastDb||now))/1000);lastDb=now;physics(dt);updateRemote();sendState(now);renderer.render(scene,camera)}
+requestAnimationFrame(animate);
+addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+addEventListener("beforeunload",()=>{if(channel)db.removeChannel(channel)});
+</script>
+</body></html>
