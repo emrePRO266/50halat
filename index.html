@@ -14,9 +14,13 @@ button{background:#2677e8;border:0;font-weight:700;cursor:pointer}button.seconda
 #hud{position:fixed;z-index:3;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;pointer-events:none}
 .pill{background:#101d31dd;border:1px solid #38516e;padding:9px 12px;border-radius:12px;font-size:13px}
 #help{position:fixed;z-index:3;bottom:12px;left:12px;background:#101d31dd;padding:10px 13px;border-radius:12px;font-size:12px;color:#d8e5f6}
-#mobile{position:fixed;z-index:4;bottom:18px;right:18px;display:none;gap:8px}
-#mobile button{width:54px;height:54px;margin:0;padding:0;border-radius:50%;background:#17375cdd}
-@media(max-width:700px){#mobile{display:flex;flex-wrap:wrap;width:120px}#help{max-width:52vw}}
+#mobile{position:fixed;z-index:4;inset:0;display:none;pointer-events:none;}
+.stick{position:absolute;bottom:28px;width:142px;height:142px;border:2px solid #ffffff66;border-radius:50%;background:#10243c66;pointer-events:auto;touch-action:none;}
+#moveStick{left:24px}#lookStick{right:24px}
+.knob{position:absolute;left:43px;top:43px;width:54px;height:54px;border-radius:50%;background:#70b7ffcc;border:2px solid #fff9;box-shadow:0 3px 12px #0008;pointer-events:none}
+.stickLabel{position:absolute;top:-24px;left:0;right:0;text-align:center;font-size:12px;color:#fff;text-shadow:0 1px 4px #000}
+#jumpBtn{position:absolute;right:180px;bottom:48px;width:68px;height:68px;border-radius:50%;padding:0;margin:0;pointer-events:auto;background:#2677e8dd;touch-action:none}
+@media(max-width:700px){#help{max-width:52vw}}
 #toast{position:fixed;z-index:8;top:70px;left:50%;transform:translateX(-50%);background:#152c49;padding:10px 16px;border-radius:12px;display:none}
 </style>
 </head>
@@ -25,7 +29,7 @@ button{background:#2677e8;border:0;font-weight:700;cursor:pointer}button.seconda
 <section id="deviceSelect" class="panel"><h1>🎮 Nasıl oynayacaksın?</h1><p>Başlamadan önce cihazını seç. Kontroller buna göre ayarlanacak.</p><button data-mode="tablet">📱 Tablet / Dokunmatik</button><button data-mode="computer" class="secondary">💻 Bilgisayar / Klavye</button><button data-mode="gamepad" class="secondary">🎮 Gamepad</button></section>
 <div id="hud" class="hidden"><div class="pill" id="roomLabel">ODA</div><div class="pill" id="playersLabel">Oyuncu: 1/4</div></div>
 <div id="help" class="hidden">WASD: Hareket · SPACE: Zıpla · Halat en fazla 6 birim uzar</div>
-<div id="mobile" class="hidden"><button data-key="w">▲</button><button data-key="a">◀</button><button data-key="d">▶</button><button data-key="s">▼</button><button data-key=" ">Zıpla</button></div>
+<div id="mobile" class="hidden"><div class="stick" id="moveStick"><span class="stickLabel">HAREKET</span><div class="knob"></div></div><div class="stick" id="lookStick"><span class="stickLabel">KAMERA</span><div class="knob"></div></div><button id="jumpBtn">ZIPLA</button></div>
 <div id="toast"></div>
 <section id="menu" class="panel hidden">
 <h1>🪢 Halatlı Parkur 3D</h1>
@@ -103,7 +107,7 @@ $("startBtn").onclick=async()=>{await db.from("game_rooms").update({status:"runn
 function beginGame(){started=true;$("menu").classList.add("hidden");toast("Parkur başladı! Takımını bırakma.");}
 window.addEventListener("keydown",e=>{if(controlMode==="computer")keys[e.key.toLowerCase()]=true;if(e.key===" ")e.preventDefault()});
 window.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
-document.querySelectorAll("#deviceSelect [data-mode]").forEach(b=>b.onclick=()=>{controlMode=b.dataset.mode;$("deviceSelect").classList.add("hidden");$("menu").classList.remove("hidden");$("mobile").classList.toggle("hidden",controlMode!=="tablet");$("mobile").style.display=controlMode==="tablet"?"flex":"none";$("help").textContent=controlMode==="tablet"?"Ekrandaki tuşlarla hareket et · Zıpla":controlMode==="gamepad"?"Gamepad: Sol çubukla hareket · A/B: Zıpla":"WASD: Hareket · SPACE: Zıpla"});
+document.querySelectorAll("#deviceSelect [data-mode]").forEach(b=>b.onclick=()=>{controlMode=b.dataset.mode;$("deviceSelect").classList.add("hidden");$("menu").classList.remove("hidden");$("mobile").classList.toggle("hidden",controlMode!=="tablet");$("mobile").style.display=controlMode==="tablet"?"flex":"none";$("help").textContent=controlMode==="tablet"?"Sol joystick: hareket · Sağ joystick: kamera · Zıpla: buton":controlMode==="gamepad"?"Gamepad: Sol çubukla hareket · A/B: Zıpla":"WASD: Hareket · SPACE: Zıpla"});
 document.querySelectorAll("#mobile button").forEach(b=>{
  const k=b.dataset.key;b.addEventListener("pointerdown",e=>{e.preventDefault();keys[k]=true});
  ["pointerup","pointerleave","pointercancel"].forEach(ev=>b.addEventListener(ev,()=>keys[k]=false));
@@ -132,6 +136,7 @@ makeSleeve(-.32);makeSleeve(.32);
 const remoteColorMats=new Map();
 function remoteMaterial(slot){const c=colorForSlot(slot);if(!remoteColorMats.has(c))remoteColorMats.set(c,mat(c));return remoteColorMats.get(c)}
 let pos=new THREE.Vector3(0,0,2),vel=new THREE.Vector3(),grounded=false,lastFacing=new THREE.Vector3(0,0,-1);
+let moveStick={x:0,y:0},cameraYaw=0,cameraPitch=0;
 const ropeMat=new THREE.LineBasicMaterial({color:0xffe08a,linewidth:3});const ropes=new Map();
 function lineFor(id){if(!ropes.has(id)){const geo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);const l=new THREE.Line(geo,ropeMat);scene.add(l);ropes.set(id,l)}return ropes.get(id)}
 function updateRemote(){
@@ -139,13 +144,21 @@ function updateRemote(){
  const a=remoteAvatars.get(id);a.position.set(p.x,p.y,p.z);const l=lineFor(id);l.geometry.setFromPoints([new THREE.Vector3(pos.x,pos.y+.9,pos.z),new THREE.Vector3(p.x,p.y+.9,p.z)])}
  for(const [id,a] of remoteAvatars)if(!others.has(id)){scene.remove(a);remoteAvatars.delete(id);if(ropes.has(id)){scene.remove(ropes.get(id));ropes.delete(id)}}
 }
+function setupStick(id,onMove){const el=$(id),knob=el.querySelector(".knob");let active=null,origin=null;const reset=()=>{active=null;origin=null;knob.style.transform="translate(0px,0px)";onMove(0,0)};el.addEventListener("pointerdown",e=>{e.preventDefault();active=e.pointerId;el.setPointerCapture(active);const r=el.getBoundingClientRect();origin={x:r.left+r.width/2,y:r.top+r.height/2};update(e)});function update(e){if(active!==e.pointerId)return;let dx=e.clientX-origin.x,dy=e.clientY-origin.y;const max=48,len=Math.hypot(dx,dy);if(len>max){dx=dx/len*max;dy=dy/len*max}knob.style.transform=`translate(${dx}px,${dy}px)`;onMove(dx/max,dy/max)}el.addEventListener("pointermove",update);el.addEventListener("pointerup",reset);el.addEventListener("pointercancel",reset);}
+setupStick("moveStick",(x,y)=>{moveStick.x=x;moveStick.y=y});
+setupStick("lookStick",(x,y)=>{cameraYaw-=x*.055;cameraPitch=Math.max(-1.05,Math.min(1.05,cameraPitch-y*.035))});
+$("jumpBtn").addEventListener("pointerdown",e=>{e.preventDefault();keys[" "]=true});["pointerup","pointercancel","pointerleave"].forEach(ev=>$("jumpBtn").addEventListener(ev,()=>keys[" "]=false));
 function readGamepad(){if(controlMode!=="gamepad")return;const pads=navigator.getGamepads?.()||[];const gp=Array.from(pads).find(Boolean);if(!gp)return;const dead=.18;const x=Math.abs(gp.axes[0]||0)>dead?gp.axes[0]:0,z=Math.abs(gp.axes[1]||0)>dead?gp.axes[1]:0;keys.a=x<-.1;keys.d=x>.1;keys.w=z<-.1;keys.s=z>.1;keys[" "]=!!(gp.buttons[0]?.pressed||gp.buttons[1]?.pressed)}
 function physics(dt){
  if(!started)return;
  readGamepad();
- const forward=new THREE.Vector3((keys.d?1:0)-(keys.a?1:0),0,(keys.s?1:0)-(keys.w?1:0));
- if(forward.lengthSq()>0){forward.normalize();lastFacing.copy(forward)}
- vel.x=forward.x*6;vel.z=forward.z*6;
+ let ix=(keys.d?1:0)-(keys.a?1:0),iy=(keys.s?1:0)-(keys.w?1:0);
+ if(controlMode==="tablet"){ix=moveStick.x;iy=moveStick.y}
+ const forward=new THREE.Vector3(Math.sin(cameraYaw),0,-Math.cos(cameraYaw));
+ const right=new THREE.Vector3(Math.cos(cameraYaw),0,Math.sin(cameraYaw));
+ const move=right.multiplyScalar(ix).add(forward.multiplyScalar(-iy));if(move.lengthSq()>1)move.normalize();
+ if(move.lengthSq()>.01)lastFacing.copy(move.clone().normalize());
+ vel.x=move.x*6;vel.z=move.z*6;
  if(keys[" "]&&grounded){vel.y=8;grounded=false}
  vel.y-=19*dt;
  // Halat gerilimi: en yakındaki takım arkadaşına göre hareketi sınırla.
@@ -165,7 +178,8 @@ function physics(dt){
  }
  if(pos.y < -10){pos.set(0,1,2);vel.set(0,0,0);toast("Düştün! Başlangıç noktasına döndün.")}
  avatar.position.copy(pos);avatar.rotation.y=Math.atan2(lastFacing.x,lastFacing.z);
- camera.position.set(pos.x,pos.y+1.48,pos.z);camera.lookAt(pos.x+lastFacing.x,pos.y+1.35,pos.z+lastFacing.z);
+ camera.position.set(pos.x,pos.y+1.48,pos.z);
+ const viewDir=new THREE.Vector3(Math.sin(cameraYaw)*Math.cos(cameraPitch),Math.sin(cameraPitch),-Math.cos(cameraYaw)*Math.cos(cameraPitch));camera.lookAt(pos.x+viewDir.x,pos.y+1.48+viewDir.y,pos.z+viewDir.z);
 }
 async function sendState(now){
  if(!me||!room||!started||now-lastSend<120)return;lastSend=now;
