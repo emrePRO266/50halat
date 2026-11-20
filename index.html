@@ -103,7 +103,7 @@ $("startBtn").onclick=async()=>{await db.from("game_rooms").update({status:"runn
 function beginGame(){started=true;$("menu").classList.add("hidden");toast("Parkur başladı! Takımını bırakma.");}
 window.addEventListener("keydown",e=>{if(controlMode==="computer")keys[e.key.toLowerCase()]=true;if(e.key===" ")e.preventDefault()});
 window.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
-document.querySelectorAll("#deviceSelect [data-mode]").forEach(b=>b.onclick=()=>{controlMode=b.dataset.mode;$("deviceSelect").classList.add("hidden");$("menu").classList.remove("hidden");$("mobile").classList.toggle("hidden",controlMode!=="tablet");$("help").textContent=controlMode==="tablet"?"Ekrandaki tuşlarla hareket et · Zıpla":controlMode==="gamepad"?"Gamepad: Sol çubukla hareket · A/B: Zıpla":"WASD: Hareket · SPACE: Zıpla"});
+document.querySelectorAll("#deviceSelect [data-mode]").forEach(b=>b.onclick=()=>{controlMode=b.dataset.mode;$("deviceSelect").classList.add("hidden");$("menu").classList.remove("hidden");$("mobile").classList.toggle("hidden",controlMode!=="tablet");$("mobile").style.display=controlMode==="tablet"?"flex":"none";$("help").textContent=controlMode==="tablet"?"Ekrandaki tuşlarla hareket et · Zıpla":controlMode==="gamepad"?"Gamepad: Sol çubukla hareket · A/B: Zıpla":"WASD: Hareket · SPACE: Zıpla"});
 document.querySelectorAll("#mobile button").forEach(b=>{
  const k=b.dataset.key;b.addEventListener("pointerdown",e=>{e.preventDefault();keys[k]=true});
  ["pointerup","pointerleave","pointercancel"].forEach(ev=>b.addEventListener(ev,()=>keys[k]=false));
