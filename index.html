@@ -43,13 +43,13 @@ const SUPABASE_URL = "https://greikwornaifopisuyze.supabase.co";
 const SUPABASE_KEY = "sb_publishable_kSKf7EpaNNdE1lxrDj5oAg_e-Jq83jw";
 const db = window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=id=>document.getElementById(id);
-const playerId=localStorage.getItem("halat_player_id")||crypto.randomUUID();
-localStorage.setItem("halat_player_id",playerId);
+let playerId=crypto.randomUUID();
 let room=null, me=null, channel=null, others=new Map(), started=false, lastSend=0, lastDb=0;
 const MAX_ROPE=6, keys={};
 function toast(t){$("toast").textContent=t;$("toast").style.display="block";setTimeout(()=>$("toast").style.display="none",2300)}
 function code(){return Math.random().toString(36).slice(2,8).toUpperCase()}
 async function createRoom(){
+ playerId=crypto.randomUUID();
  const nick=$("nickname").value.trim()||"Oyuncu", join_code=code();
  const {data:r,error}=await db.from("game_rooms").insert({join_code,host_id:playerId,max_players:4}).select().single();
  if(error){toast("Oda oluşturulamadı: "+error.message);return}
@@ -59,6 +59,7 @@ async function createRoom(){
  me=p;await enterRoom();
 }
 async function joinRoom(){
+ playerId=crypto.randomUUID();
  const nick=$("nickname").value.trim()||"Oyuncu", c=$("roomCode").value.trim().toUpperCase();
  if(c.length!==6){toast("6 haneli oda kodunu gir.");return}
  const {data:r,error}=await db.from("game_rooms").select("*").eq("join_code",c).eq("status","waiting").maybeSingle();
