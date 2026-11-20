@@ -27,15 +27,15 @@ button{background:#2677e8;border:0;font-weight:700;cursor:pointer}button.seconda
 <body>
 <div id="game"></div>
 <section id="deviceSelect" class="panel"><h1>🎮 Nasıl oynayacaksın?</h1><p>Başlamadan önce cihazını seç. Kontroller buna göre ayarlanacak.</p><button data-mode="tablet">📱 Tablet / Dokunmatik</button><button data-mode="computer" class="secondary">💻 Bilgisayar / Klavye</button><button data-mode="gamepad" class="secondary">🎮 Gamepad</button></section>
-<div id="hud" class="hidden"><div class="pill" id="roomLabel">ODA</div><div class="pill" id="playersLabel">Oyuncu: 1/4</div></div>
+<div id="hud" class="hidden"><div class="pill" id="roomLabel">ODA</div><div class="pill" id="playersLabel">Oyuncu: 1/4</div><div class="pill" id="levelLabel">SEVİYE 1 / 100</div></div>
 <div id="help" class="hidden">WASD: Hareket · SPACE: Zıpla · Halat en fazla 6 birim uzar</div>
 <div id="mobile" class="hidden"><div class="stick" id="moveStick"><span class="stickLabel">HAREKET</span><div class="knob"></div></div><div class="stick" id="lookStick"><span class="stickLabel">KAMERA</span><div class="knob"></div></div><button id="jumpBtn">ZIPLA</button></div>
 <div id="toast"></div>
 <section id="menu" class="panel hidden">
 <h1>🪢 Halatlı Parkur 3D</h1>
-<p>2–4 arkadaş aynı odaya girin. Biriniz düşerse takım arkadaşınız halatın sınırları içinde onu çekerek kurtarmaya çalışabilir.</p>
+<p>Tek başına veya 2–4 kişilik grupla oyna. Grup modunda halatla bağlısınız; 100 parkur seviyesi seni bekliyor.</p>
 <input id="nickname" maxlength="20" placeholder="Oyuncu adın" value="Oyuncu">
-<div class="row"><button id="createBtn">Oda Oluştur</button><button id="joinBtn" class="secondary">Odaya Katıl</button></div>
+<div class="row"><button id="groupBtn">👥 Grup</button><button id="soloBtn" class="secondary">🧍 Tek Kişi</button></div><div class="row hidden" id="groupActions"><button id="createBtn">Oda Oluştur</button><button id="joinBtn" class="secondary">Odaya Katıl</button></div>
 <input id="roomCode" maxlength="6" placeholder="6 haneli oda kodu" style="text-transform:uppercase">
 <div id="waiting" class="hidden">
 <p id="waitingText"></p><button id="startBtn">Oyunu Başlat</button><button id="copyBtn" class="secondary">Oda Kodunu Kopyala</button>
@@ -49,10 +49,12 @@ const SUPABASE_KEY = "sb_publishable_kSKf7EpaNNdE1lxrDj5oAg_e-Jq83jw";
 const db = window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=id=>document.getElementById(id);
 let playerId=crypto.randomUUID();
-let room=null, me=null, channel=null, others=new Map(), started=false, lastSend=0, lastDb=0, controlMode=null;
+let room=null, me=null, channel=null, others=new Map(), started=false, lastSend=0, lastDb=0, controlMode=null, playMode="group", currentLevel=1, lastActivity=Date.now(), lastCleanup=0;
 const MAX_ROPE=6, keys={};
 function toast(t){$("toast").textContent=t;$("toast").style.display="block";setTimeout(()=>$("toast").style.display="none",2300)}
-function code(){return Math.random().toString(36).slice(2,8).toUpperCase()}
+function code(){return Array.from({length:6},()=>String([1,3,5,7,9][Math.floor(Math.random()*5)])).join("")}
+function chooseMode(mode){playMode=mode;$("groupActions").classList.toggle("hidden",mode!=="group");if(mode==="solo")startSolo()}
+function startSolo(){playerId=crypto.randomUUID();room=null;me={id:playerId,nickname:$("nickname").value.trim()||"Oyuncu",slot:0};others.clear();currentLevel=1;setOwnColor(0);$("menu").classList.add("hidden");$("hud").classList.remove("hidden");$("help").classList.remove("hidden");$("mobile").classList.toggle("hidden",controlMode!=="tablet");$("mobile").style.display=controlMode==="tablet"?"flex":"none";$("roomLabel").textContent="TEK KİŞİ";$("playersLabel").textContent="Oyuncu: 1/1";$("levelLabel").textContent="SEVİYE 1 / 100";started=true;lastActivity=Date.now();buildParkour();toast("Tek kişilik oyun başladı!")}
 async function createRoom(){
  playerId=crypto.randomUUID();
  const nick=$("nickname").value.trim()||"Oyuncu", join_code=code();
@@ -66,7 +68,7 @@ async function createRoom(){
 async function joinRoom(){
  playerId=crypto.randomUUID();
  const nick=$("nickname").value.trim()||"Oyuncu", c=$("roomCode").value.trim().toUpperCase();
- if(c.length!==6){toast("6 haneli oda kodunu gir.");return}
+ if(!/^[13579]{6}$/.test(c)){toast("Oda kodu 6 haneden oluşmalı ve yalnızca tek rakamlar içermeli.");return}
  const {data:r,error}=await db.from("game_rooms").select("*").eq("join_code",c).eq("status","waiting").maybeSingle();
  if(error||!r){toast("Oda bulunamadı veya oyun başlamış.");return}
  const {data:ps,error:pe}=await db.from("game_players").select("*").eq("room_id",r.id).order("slot");
@@ -81,8 +83,8 @@ async function enterRoom(){
  setOwnColor(me.slot);$("menu").querySelectorAll("input,.row").forEach(x=>x.classList.add("hidden"));
  $("waiting").classList.remove("hidden");$("waitingText").textContent="Oda kodu: "+room.join_code+" · Arkadaşlarına kodu gönder.";
  $("startBtn").classList.toggle("hidden",room.host_id!==playerId);
- $("hud").classList.remove("hidden");$("help").classList.remove("hidden");$("mobile").classList.remove("hidden");
- $("roomLabel").textContent="ODA "+room.join_code;
+ $("hud").classList.remove("hidden");$("help").classList.remove("hidden");$("mobile").classList.toggle("hidden",controlMode!=="tablet");$("mobile").style.display=controlMode==="tablet"?"flex":"none";
+ $("roomLabel").textContent="ODA "+room.join_code;$("levelLabel").textContent="SEVİYE 1 / 100";
  await refreshPlayers();subscribe();
 }
 async function refreshPlayers(){
@@ -101,11 +103,11 @@ function subscribe(){
   room=payload.new;if(room.status==="running")beginGame();
  }).subscribe();
 }
-$("createBtn").onclick=createRoom;$("joinBtn").onclick=joinRoom;
+$("createBtn").onclick=createRoom;$("joinBtn").onclick=joinRoom;$("groupBtn").onclick=()=>chooseMode("group");$("soloBtn").onclick=()=>chooseMode("solo");
 $("copyBtn").onclick=()=>navigator.clipboard?.writeText(room.join_code).then(()=>toast("Oda kodu kopyalandı."));
 $("startBtn").onclick=async()=>{await db.from("game_rooms").update({status:"running"}).eq("id",room.id);beginGame()};
-function beginGame(){started=true;$("menu").classList.add("hidden");toast("Parkur başladı! Takımını bırakma.");}
-window.addEventListener("keydown",e=>{if(controlMode==="computer")keys[e.key.toLowerCase()]=true;if(e.key===" ")e.preventDefault()});
+function beginGame(){started=true;currentLevel=1;lastActivity=Date.now();buildParkour();$("levelLabel").textContent="SEVİYE 1 / 100";$("menu").classList.add("hidden");toast("Parkur başladı! Takımını bırakma.");}
+window.addEventListener("keydown",e=>{if(controlMode==="computer")keys[e.key.toLowerCase()]=true;if(e.key===" ")e.preventDefault();if(["w","a","s","d"," "].includes(e.key.toLowerCase()))lastActivity=Date.now()});
 window.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
 document.querySelectorAll("#deviceSelect [data-mode]").forEach(b=>b.onclick=()=>{controlMode=b.dataset.mode;$("deviceSelect").classList.add("hidden");$("menu").classList.remove("hidden");$("mobile").classList.toggle("hidden",controlMode!=="tablet");$("mobile").style.display=controlMode==="tablet"?"flex":"none";$("help").textContent=controlMode==="tablet"?"Sol joystick: hareket · Sağ joystick: kamera · Zıpla: buton":controlMode==="gamepad"?"Gamepad: Sol çubukla hareket · A/B: Zıpla":"WASD: Hareket · SPACE: Zıpla"});
 document.querySelectorAll("#mobile button").forEach(b=>{
@@ -120,10 +122,11 @@ const sun=new THREE.DirectionalLight(0xffffff,2);sun.position.set(8,18,8);sun.ca
 const mat=(c)=>new THREE.MeshStandardMaterial({color:c,roughness:.72});
 const floorMat=mat(0x274e70),platformMat=mat(0x18a58a),obstacleMat=mat(0xf3a33b);
 function platform(x,y,z,w,h,d,color=0x18a58a){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat(color));m.position.set(x,y,z);m.receiveShadow=true;m.castShadow=true;scene.add(m);colliders.push({x,y,z,w,h,d});return m}
-const colliders=[];
-platform(0,-.5,0,12,1,12,0x274e70);
-platform(0,.1,-9,5,.5,4);platform(5,.5,-15,4,.5,4);platform(-1,1,-21,4,.5,4);platform(-7,1.5,-27,5,.5,4);platform(0,2,-34,7,.5,6,0x2476cf);
-for(let i=0;i<5;i++){const b=new THREE.Mesh(new THREE.BoxGeometry(1,.6,1),obstacleMat);b.position.set((i%2?1:-1)*1.3,.55,-5-i*5);b.castShadow=true;scene.add(b)}
+const colliders=[];let levelObjects=[];
+function clearParkour(){for(const o of levelObjects)scene.remove(o);levelObjects=[];colliders.length=0}
+function addLevelPlatform(x,y,z,w,h,d,color=0x18a58a){const m=platform(x,y,z,w,h,d,color);levelObjects.push(m);return m}
+function buildParkour(){clearParkour();addLevelPlatform(0,-.5,0,12,1,12,0x274e70);for(let lv=0;lv<100;lv++){const base=-10-lv*22,pattern=lv%4;const coords=pattern===0?[[0,0],[4,-5],[-2,-10],[3,-15],[0,-19]]:pattern===1?[[-3,0],[2,-5],[5,-10],[0,-15],[-3,-19]]:pattern===2?[[3,0],[-2,-5],[-5,-10],[1,-15],[3,-19]]:[[0,0],[0,-5],[4,-10],[-4,-15],[0,-19]];coords.forEach((q,i)=>{const x=q[0],z=base+q[1],y=.15+lv*.12+i*.22;addLevelPlatform(x,y,z,i===4?6:4,.5,3.5,i===4?0x2476cf:0x18a58a);if(i<4){const b=new THREE.Mesh(new THREE.BoxGeometry(.9,.65,.9),obstacleMat);b.position.set(x+(lv%2?1.1:-1.1),y+.55,z-1);b.castShadow=true;scene.add(b);levelObjects.push(b)}})}}
+buildParkour();
 const playerColors=[0x2563eb,0xe85d75,0xf0b429,0x9b72cf];
 function colorForSlot(slot){return playerColors[((slot??0)%playerColors.length+playerColors.length)%playerColors.length]}
 const playerMat=mat(colorForSlot(0)),remoteMats=playerColors.map(c=>mat(c));
@@ -144,10 +147,10 @@ function updateRemote(){
  const a=remoteAvatars.get(id);a.position.set(p.x,p.y,p.z);const l=lineFor(id);l.geometry.setFromPoints([new THREE.Vector3(pos.x,pos.y+.9,pos.z),new THREE.Vector3(p.x,p.y+.9,p.z)])}
  for(const [id,a] of remoteAvatars)if(!others.has(id)){scene.remove(a);remoteAvatars.delete(id);if(ropes.has(id)){scene.remove(ropes.get(id));ropes.delete(id)}}
 }
-function setupStick(id,onMove){const el=$(id),knob=el.querySelector(".knob");let active=null,origin=null;const reset=()=>{active=null;origin=null;knob.style.transform="translate(0px,0px)";onMove(0,0,true)};el.addEventListener("pointerdown",e=>{e.preventDefault();active=e.pointerId;el.setPointerCapture(active);const r=el.getBoundingClientRect();origin={x:r.left+r.width/2,y:r.top+r.height/2};update(e)});function update(e){if(active!==e.pointerId)return;let dx=e.clientX-origin.x,dy=e.clientY-origin.y;const max=48,len=Math.hypot(dx,dy);if(len>max){dx=dx/len*max;dy=dy/len*max}knob.style.transform=`translate(${dx}px,${dy}px)`;onMove(dx/max,dy/max,false)}el.addEventListener("pointermove",update);el.addEventListener("pointerup",reset);el.addEventListener("pointercancel",reset);}
+function setupStick(id,onMove){const el=$(id),knob=el.querySelector(".knob");let active=null,origin=null;const reset=()=>{active=null;origin=null;knob.style.transform="translate(0px,0px)";onMove(0,0,true)};el.addEventListener("pointerdown",e=>{e.preventDefault();lastActivity=Date.now();active=e.pointerId;el.setPointerCapture(active);const r=el.getBoundingClientRect();origin={x:r.left+r.width/2,y:r.top+r.height/2};update(e)});function update(e){if(active!==e.pointerId)return;let dx=e.clientX-origin.x,dy=e.clientY-origin.y;const max=48,len=Math.hypot(dx,dy);if(len>max){dx=dx/len*max;dy=dy/len*max}knob.style.transform=`translate(${dx}px,${dy}px)`;onMove(dx/max,dy/max,false)}el.addEventListener("pointermove",update);el.addEventListener("pointerup",reset);el.addEventListener("pointercancel",reset);}
 setupStick("moveStick",(x,y)=>{moveStick.x=x;moveStick.y=y});
-let prevLookX=0,prevLookY=0;setupStick("lookStick",(x,y,reset)=>{if(reset){prevLookX=0;prevLookY=0;return}cameraYaw-=(x-prevLookX)*.055;cameraPitch=Math.max(-1.05,Math.min(1.05,cameraPitch-(y-prevLookY)*.035));prevLookX=x;prevLookY=y});
-$("jumpBtn").addEventListener("pointerdown",e=>{e.preventDefault();keys[" "]=true});["pointerup","pointercancel","pointerleave"].forEach(ev=>$("jumpBtn").addEventListener(ev,()=>keys[" "]=false));
+let prevLookX=0,prevLookY=0;setupStick("lookStick",(x,y,reset)=>{if(reset){prevLookX=0;prevLookY=0;return}cameraYaw-=(x-prevLookX)*.055;cameraPitch=Math.max(-1.52,Math.min(1.52,cameraPitch-(y-prevLookY)*.05));lastActivity=Date.now();prevLookX=x;prevLookY=y});
+$("jumpBtn").addEventListener("pointerdown",e=>{e.preventDefault();lastActivity=Date.now();keys[" "]=true});["pointerup","pointercancel","pointerleave"].forEach(ev=>$("jumpBtn").addEventListener(ev,()=>keys[" "]=false));
 function readGamepad(){if(controlMode!=="gamepad")return;const pads=navigator.getGamepads?.()||[];const gp=Array.from(pads).find(Boolean);if(!gp)return;const dead=.18;const x=Math.abs(gp.axes[0]||0)>dead?gp.axes[0]:0,z=Math.abs(gp.axes[1]||0)>dead?gp.axes[1]:0;keys.a=x<-.1;keys.d=x>.1;keys.w=z<-.1;keys.s=z>.1;keys[" "]=!!(gp.buttons[0]?.pressed||gp.buttons[1]?.pressed)}
 function physics(dt){
  if(!started)return;
@@ -157,12 +160,12 @@ function physics(dt){
  const forward=new THREE.Vector3(Math.sin(cameraYaw),0,-Math.cos(cameraYaw));
  const right=new THREE.Vector3(Math.cos(cameraYaw),0,Math.sin(cameraYaw));
  const move=right.multiplyScalar(ix).add(forward.multiplyScalar(-iy));if(move.lengthSq()>1)move.normalize();
- if(move.lengthSq()>.01)lastFacing.copy(move.clone().normalize());
+ if(move.lengthSq()>.01){lastFacing.copy(move.clone().normalize());lastActivity=Date.now()}
  vel.x=move.x*6;vel.z=move.z*6;
  if(keys[" "]&&grounded){vel.y=8;grounded=false}
  vel.y-=19*dt;
  // Halat gerilimi: en yakındaki takım arkadaşına göre hareketi sınırla.
- for(const p of others.values()){
+ for(const p of (playMode==="group"?others.values():[])){
   const dx=p.x-pos.x,dy=p.y-pos.y,dz=p.z-pos.z,dist=Math.hypot(dx,dy,dz);
   if(dist>MAX_ROPE){const nx=dx/dist,ny=dy/dist,nz=dz/dist;const excess=dist-MAX_ROPE;
    pos.x+=nx*excess*.55;pos.z+=nz*excess*.55;
@@ -176,18 +179,21 @@ function physics(dt){
    const top=c.y+c.h/2;if(oldY>=top-.1&&pos.y<=top&&vel.y<=0){pos.y=top;vel.y=0;grounded=true}
   }
  }
- if(pos.y < -10){pos.set(0,1,2);vel.set(0,0,0);toast("Düştün! Başlangıç noktasına döndün.")}
+ if(pos.y < -10){pos.set(0,1,2-(currentLevel-1)*22);vel.set(0,0,0);toast("Düştün! Seviyenin başına döndün.")}
+ const reached=Math.floor((-pos.z-8)/22)+1;if(reached>currentLevel&&currentLevel<100){currentLevel=Math.min(100,reached);$("levelLabel").textContent="SEVİYE "+currentLevel+" / 100";toast("Seviye "+currentLevel+"!") }
  avatar.position.copy(pos);avatar.rotation.y=Math.atan2(lastFacing.x,lastFacing.z);
  camera.position.set(pos.x,pos.y+1.48,pos.z);
  const viewDir=new THREE.Vector3(Math.sin(cameraYaw)*Math.cos(cameraPitch),Math.sin(cameraPitch),-Math.cos(cameraYaw)*Math.cos(cameraPitch));camera.lookAt(pos.x+viewDir.x,pos.y+1.48+viewDir.y,pos.z+viewDir.z);
 }
 async function sendState(now){
- if(!me||!room||!started||now-lastSend<120)return;lastSend=now;
- const state=pos.y<-.5?"falling":"active";
- const payload={x:+pos.x.toFixed(2),y:+pos.y.toFixed(2),z:+pos.z.toFixed(2),state,updated_at:new Date().toISOString()};
- db.from("game_players").update(payload).eq("id",playerId).then(()=>{});
+ if(!me||!room||!started||now-lastSend<2000)return;lastSend=now;
+ if(Date.now()-lastActivity>60000){await db.from("game_players").delete().eq("id",playerId);toast("Hareketsiz kaldığın için odadan çıkarıldın.");started=false;return}
+ const state=pos.y<-.5?"falling":"active";const payload={x:+pos.x.toFixed(2),y:+pos.y.toFixed(2),z:+pos.z.toFixed(2),state,updated_at:new Date().toISOString()};db.from("game_players").update(payload).eq("id",playerId).then(()=>{});
+ if(now-lastCleanup>15000){lastCleanup=now;const cutoff=new Date(Date.now()-60000).toISOString();db.from("game_players").delete().eq("room_id",room.id).neq("id",playerId).lt("updated_at",cutoff).then(()=>{})}
 }
-function animate(now){requestAnimationFrame(animate);const dt=Math.min(.04,(now-(lastDb||now))/1000);lastDb=now;physics(dt);updateRemote();sendState(now);renderer.render(scene,camera)}
+function animate(now){requestAnimationFrame(animate);
+renderer.domElement.addEventListener("click",()=>{if(controlMode==="computer"&&started&&document.pointerLockElement!==renderer.domElement)renderer.domElement.requestPointerLock?.()});
+document.addEventListener("mousemove",e=>{if(controlMode==="computer"&&started&&document.pointerLockElement===renderer.domElement){cameraYaw-=e.movementX*.0025;cameraPitch=Math.max(-1.52,Math.min(1.52,cameraPitch-e.movementY*.0025));lastActivity=Date.now()}});const dt=Math.min(.04,(now-(lastDb||now))/1000);lastDb=now;physics(dt);updateRemote();sendState(now);renderer.render(scene,camera)}
 requestAnimationFrame(animate);
 addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
 addEventListener("beforeunload",()=>{if(channel)db.removeChannel(channel)});
