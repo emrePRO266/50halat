@@ -36,7 +36,7 @@ button{background:#2677e8;border:0;font-weight:700;cursor:pointer}button.seconda
 <p>Tek başına veya 2–4 kişilik grupla oyna. Grup modunda halatla bağlısınız; 100 parkur seviyesi seni bekliyor.</p>
 <input id="nickname" maxlength="20" placeholder="Oyuncu adın" value="Oyuncu">
 <div class="row"><button id="groupBtn">👥 Grup</button><button id="soloBtn" class="secondary">🧍 Tek Kişi</button></div><div class="row hidden" id="groupActions"><button id="createBtn">Oda Oluştur</button><button id="joinBtn" class="secondary">Odaya Katıl</button></div>
-<input id="roomCode" maxlength="6" placeholder="6 haneli oda kodu" style="text-transform:uppercase">
+<input id="roomCode" maxlength="6" placeholder="6 tek rakamlı oda kodu" style="text-transform:uppercase">
 <div id="waiting" class="hidden">
 <p id="waitingText"></p><button id="startBtn">Oyunu Başlat</button><button id="copyBtn" class="secondary">Oda Kodunu Kopyala</button>
 </div>
@@ -105,7 +105,7 @@ function subscribe(){
 }
 $("createBtn").onclick=createRoom;$("joinBtn").onclick=joinRoom;$("groupBtn").onclick=()=>chooseMode("group");$("soloBtn").onclick=()=>chooseMode("solo");
 $("copyBtn").onclick=()=>navigator.clipboard?.writeText(room.join_code).then(()=>toast("Oda kodu kopyalandı."));
-$("startBtn").onclick=async()=>{await db.from("game_rooms").update({status:"running"}).eq("id",room.id);beginGame()};
+$("startBtn").onclick=async()=>{const {data,error}=await db.from("game_players").select("id").eq("room_id",room.id);if(error||!data||data.length<2){toast("Grup oyunu için en az 2 oyuncu gerekli.");return}await db.from("game_rooms").update({status:"running"}).eq("id",room.id);beginGame()};
 function beginGame(){started=true;currentLevel=1;lastActivity=Date.now();buildParkour();$("levelLabel").textContent="SEVİYE 1 / 100";$("menu").classList.add("hidden");toast("Parkur başladı! Takımını bırakma.");}
 window.addEventListener("keydown",e=>{if(controlMode==="computer")keys[e.key.toLowerCase()]=true;if(e.key===" ")e.preventDefault();if(["w","a","s","d"," "].includes(e.key.toLowerCase()))lastActivity=Date.now()});
 window.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
